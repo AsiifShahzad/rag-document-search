@@ -83,12 +83,6 @@ async def ask_question(req: AskRequest):
 
     chunks = retrieve_context(query)
 
-    # DEBUG — remove after fixing
-    print(f"QUERY: {query}")
-    print(f"CHUNKS COUNT: {len(chunks)}")
-    for i, c in enumerate(chunks):
-        print(f"CHUNK {i+1} TEXT PREVIEW: {c.get('text', '')[:100]}")
-
     if not chunks:
         return {
             "answer": "No relevant information found",
@@ -97,9 +91,6 @@ async def ask_question(req: AskRequest):
         }
 
     prompt = build_prompt(chunks, query)
-
-    # DEBUG — remove after fixing
-    print(f"PROMPT PREVIEW: {prompt[:500]}")
 
     answer = generate_answer(prompt)
     rerank_scores = [c.get("rerank_score", 0.0) for c in chunks]
