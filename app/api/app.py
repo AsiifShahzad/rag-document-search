@@ -15,8 +15,12 @@ from app.services.re_ranker import get_reranker
 from app.rag.pipeline import retrieve_context
 from app.rag.generator import generate_answer
 from app.services.ingestion_pipeline import data_ingestion
+from app.debug.debug_routes import debug_router
 
 router = APIRouter()
+
+# Include debug routes
+router.include_router(debug_router)
 
 UPLOAD_DIR = Path("data/documents")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -76,6 +80,11 @@ async def upload_pdf(file: UploadFile = File(...)):
 @router.post("/ask")
 async def ask_question(req: AskRequest):
 
+    print(f"\n{'='*60}")
+    print(f"[API] Received /ask request")
+    print(f"[API] Question: '{req.question}'")
+    print(f"{'='*60}\n")
+
     query = req.question.strip()
 
     if not query:
@@ -83,17 +92,27 @@ async def ask_question(req: AskRequest):
 
     chunks = retrieve_context(query)
 
+    print(f"\n[API] Context retrieval returned {len(chunks)} chunks")
+
     if not chunks:
+        print(f"[API] No relevant chunks found - returning empty answer")
         return {
             "answer": "No relevant information found",
             "sources": [],
             "confidence": 0.0
         }
 
+    print(f"[API] Building prompt with retrieved chunks...")
     prompt = build_prompt(chunks, query)
 
+    print(f"[API] Calling LLM to generate answer...")
     answer = generate_answer(prompt)
+    
+    print(f"[API] LLM returned answer. Formatting response...")
     rerank_scores = [c.get("rerank_score", 0.0) for c in chunks]
     response = format_response(answer, chunks, rerank_scores)
+
+    print(f"[API] /ask request complete")
+    print(f"{'='*60}\n")
 
     return response

@@ -3,27 +3,42 @@ from typing import List
 
 def build_prompt(chunks: List[dict], question: str) -> str:
 
+    print(f"\n{'='*60}")
+    print(f"[PROMPT_BUILDER] Building prompt with {len(chunks)} chunks")
+    print(f"[PROMPT_BUILDER] Question: '{question}'")
+    print(f"{'='*60}")
+
     context_parts = []
 
     for i, chunk in enumerate(chunks):
         text = chunk.get("text", "")
         source = chunk.get("source", "unknown")
         page = chunk.get("page")
+        rerank_fallback = chunk.get("rerank_fallback", False)
+        
         context_parts.append(f"[Chunk {i+1} | Source: {source}, Page: {page}]\n{text}")
+        
+        print(f"\n[PROMPT_BUILDER] Chunk {i+1}:")
+        print(f"  Source: {source}")
+        print(f"  Page: {page}")
+        print(f"  Length: {len(text)} characters")
+        if rerank_fallback:
+            print(f"  Note: Using fallback ranking (vector search)")
+        print(f"  Preview: {text[:100]}...")
 
     context = "\n\n".join(context_parts)
+    print(f"\n[PROMPT_BUILDER] Total context length: {len(context)} characters")
 
-    prompt = f"""Use the following document excerpts to answer the question at the end.
-Do NOT say "what is your question" or ask for clarification.
-Do NOT introduce yourself.
-Just directly answer the question using the context below.
-If the answer is not in the context, say "I couldn't find relevant information in the document."
-
-DOCUMENT EXCERPTS:
+    # Use a simple, direct prompt format that LLMs understand well
+    prompt = f"""Context:
 {context}
 
-QUESTION: {question}
+Question: {question}
 
-DIRECT ANSWER:"""
+Answer based only on the context above:"""
+
+    print(f"\n[PROMPT_BUILDER] Final prompt size: {len(prompt)} characters")
+    print(f"[PROMPT_BUILDER] ✓ Prompt ready for LLM")
+    print(f"{'='*60}\n")
 
     return prompt
