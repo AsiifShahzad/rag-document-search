@@ -14,19 +14,10 @@ GROQ_MODELS = [
 ]
 
 def generate_answer(prompt: str) -> str:
-    print(f"\n{'='*60}")
-    print(f"[GENERATOR] Generating answer from LLM")
-    print(f"{'='*60}")
-    print(f"\n[GENERATOR] Prompt length: {len(prompt)} characters")
-    print(f"[GENERATOR] Prompt preview (first 300 chars):\n{prompt[:300]}...")
-    print(f"\n[GENERATOR] Full prompt:\n{prompt}")
-
     if not prompt or not prompt.strip():
         raise ValueError("Prompt is empty — cannot send to Groq")
 
-    # Increased limit to 15000 to avoid cutting off questions
     if len(prompt) > 15000:
-        print(f"[GENERATOR] WARNING: Prompt exceeds 15000 chars, truncating to avoid API limits...")
         prompt = prompt[:15000]
 
     headers = {
@@ -37,7 +28,6 @@ def generate_answer(prompt: str) -> str:
     last_error = None
 
     for model in GROQ_MODELS:
-        print(f"\n[GENERATOR] Attempting model: {model}")
         payload = {
             "model": model,
             "messages": [
@@ -57,18 +47,10 @@ def generate_answer(prompt: str) -> str:
         response = requests.post(GROQ_URL, headers=headers, json=payload)
 
         if response.ok:
-            print(f"[GENERATOR] ✓ Model {model} succeeded")
             data = response.json()
             answer = data["choices"][0]["message"]["content"]
-            print(f"[GENERATOR] Answer: {answer[:200]}...")
-            print(f"{'='*60}\n")
             return answer
 
-        error = response.json().get("error", {})
-        print(f"[GENERATOR] ✗ Model {model} failed: {error.get('message', response.status_code)}")
         last_error = response
 
-    print(f"[GENERATOR] All models failed. Last error:")
-    print(f"[GENERATOR] Status: {last_error.status_code}")
-    print(f"[GENERATOR] Response: {last_error.text}")
     last_error.raise_for_status()
