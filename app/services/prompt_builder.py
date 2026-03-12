@@ -13,14 +13,17 @@ def build_prompt(chunks: List[dict], question: str) -> str:
 
     context = "\n\n".join(context_parts)
 
-    prompt = f"""You are a helpful assistant. Answer the user's question using ONLY the context provided below.
-If the answer is not found in the context, say "I couldn't find relevant information in the document."
+    prompt = f"""Use the following document excerpts to answer the question at the end.
+Do NOT say "what is your question" or ask for clarification.
+Do NOT introduce yourself.
+Just directly answer the question using the context below.
+If the answer is not in the context, say "I couldn't find relevant information in the document."
 
-CONTEXT:
+DOCUMENT EXCERPTS:
 {context}
 
 QUESTION: {question}
 
-ANSWER:"""
+DIRECT ANSWER:"""
 
     return prompt
