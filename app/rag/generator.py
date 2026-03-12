@@ -1,5 +1,3 @@
-# rag/generator.py
-
 import os
 import requests
 from dotenv import load_dotenv
@@ -10,13 +8,13 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Fallback order: best to worst
 GROQ_MODELS = [
-    "llama-3.3-70b-versatile",  # most capable
-    "llama-3.1-8b-instant",     # faster, lighter
-    "gemma2-9b-it"              # fallback
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it"
 ]
 
-
 def generate_answer(prompt: str) -> str:
+    print(f"FULL PROMPT:\n{prompt[:500]}")
 
     if not prompt or not prompt.strip():
         raise ValueError("Prompt is empty — cannot send to Groq")
@@ -36,10 +34,6 @@ def generate_answer(prompt: str) -> str:
             "model": model,
             "messages": [
                 {
-                    "role": "system",
-                    "content": "You are a helpful assistant that answers questions based on the provided document context."
-                },
-                {
                     "role": "user",
                     "content": prompt
                 }
@@ -55,7 +49,6 @@ def generate_answer(prompt: str) -> str:
             data = response.json()
             return data["choices"][0]["message"]["content"]
 
-        # If model is decommissioned or unavailable, try next one
         error = response.json().get("error", {})
         print(f"Model {model} failed: {error.get('message', response.status_code)}")
         last_error = response
