@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File,Form, HTTPException
 from fastapi.responses import JSONResponse
 from pathlib import Path
 import shutil
@@ -51,7 +51,7 @@ async def health_check():
 
 
 @router.post("/upload")
-async def upload_pdf(file: UploadFile = File(...), session_id: str = None):
+async def upload_pdf(file: UploadFile = File(...), session_id: str = Form(...)):
 
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF allowed")
