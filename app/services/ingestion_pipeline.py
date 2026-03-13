@@ -7,7 +7,7 @@ from typing import List, Tuple
 from langchain_core.documents import Document
 
 
-def data_ingestion(file_path: str) -> Tuple[List[Document], List[List[float]]]:
+def data_ingestion(file_path: str, session_id: str) -> Tuple[List[Document], List[List[float]]]:
     documents = rag_document_loader(file_path)
     chunks = split_documents(documents)
     embeddings = document_embedding(chunks)
@@ -21,5 +21,5 @@ def data_ingestion(file_path: str) -> Tuple[List[Document], List[List[float]]]:
         for doc in chunks
     ]
 
-    insert_embeddings(embeddings, metadata)
+    insert_embeddings(embeddings, metadata, session_id)
     return chunks, embeddings
