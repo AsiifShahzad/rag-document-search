@@ -1,10 +1,9 @@
 from app.rag.retriever import query_embedding, retrieve_chunks
 from app.services.re_ranker import rerank_chunks
 
-
-def retrieve_context(query: str):
+def retrieve_context(query: str, session_id: str):
     query_vector = query_embedding(query)
-    candidates, vector_scores = retrieve_chunks(query_vector, top_k=20)
+    candidates, vector_scores = retrieve_chunks(query_vector, session_id=session_id, top_k=20)
     
     if len(candidates) == 0:
         return []

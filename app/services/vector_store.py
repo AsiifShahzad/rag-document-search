@@ -134,10 +134,15 @@ def delete_session_embeddings(session_id: str) -> dict:
             "error": f"Database error: {str(e)}"
         }
 
-def similarity_search(query_embedding: List[float], top_k: int = 20) -> dict:
+def similarity_search(query_embedding: List[float], top_k: int = 20, session_id: str = None) -> dict:
+    filter_dict = None
+    if session_id:
+        filter_dict = {"session_id": {"$eq": session_id}}
+    
     results = index.query(
         vector=query_embedding,
         top_k=top_k,
-        include_metadata=True
+        include_metadata=True,
+        filter=filter_dict
     )
     return results

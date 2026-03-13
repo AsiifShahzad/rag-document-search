@@ -1,7 +1,8 @@
-from fastapi import APIRouter, UploadFile, File,Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 from pathlib import Path
 import shutil
+import uuid
 
 from app.models.schemas import AskRequest
 from app.rag.pipeline import retrieve_context
@@ -51,19 +52,16 @@ async def health_check():
 
 
 @router.post("/upload")
-async def upload_pdf(file: UploadFile = File(...), session_id: str = Form(...)):
+async def upload_pdf(file: UploadFile = File(...), session_id: str = Form(None)):
 
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF allowed")
     
+    # Auto-generate session_id if not provided
     if not session_id or not isinstance(session_id, str) or len(session_id.strip()) == 0:
-        raise HTTPException(status_code=400, detail="Valid session_id is required")
+        session_id = str(uuid.uuid4())
 
-    # Validate session_id format (alphanumeric, underscore, dash only)
-    import re
-    if not re.match(r'^[a-zA-Z0-9_-]{10,100}$', session_id):
-        raise HTTPException(status_code=400, detail="Invalid session_id format")
-
+    delete_session_embeddings(session_id)
     storage_path = UPLOAD_DIR / file.filename
 
     try:
@@ -82,20 +80,36 @@ async def upload_pdf(file: UploadFile = File(...), session_id: str = Form(...)):
             }
         )
     except ValueError as e:
-        # Clean up file if ingestion fails
-        if storage_path.exists():
-            storage_path.unlink()
+        if storage_path.exists(): storage_path.unlink()
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
     except RuntimeError as e:
-        # Clean up file if embedding fails
-        if storage_path.exists():
-            storage_path.unlink()
+        if storage_path.exists(): storage_path.unlink()
         raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
     except Exception as e:
-        # Clean up file on any unexpected error
-        if storage_path.exists():
-            storage_path.unlink()
+        if storage_path.exists(): storage_path.unlink()
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+@router.post("/cleanup")
+async def cleanup_session(session_id: str = Form(...)):
+    """Delete all embeddings for a session when user leaves/refreshes"""
+    if not session_id or not isinstance(session_id, str) or len(session_id.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Valid session_id is required")
+    
+    try:
+        result = delete_session_embeddings(session_id)
+        if result["success"]:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "message": f"Session {session_id} cleaned up",
+                    "deleted_count": result["deleted_count"]
+                }
+            )
+        else:
+            raise HTTPException(status_code=400, detail=result.get("error", "Cleanup failed"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cleanup error: {str(e)}")
 
 @router.post("/ask")
 async def ask_question(req: AskRequest):
@@ -104,7 +118,10 @@ async def ask_question(req: AskRequest):
     if not query:
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-    chunks = retrieve_context(query)
+    if not req.session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    
+    chunks = retrieve_context(query, session_id=req.session_id)  # ← fixed
 
     if not chunks:
         return {
