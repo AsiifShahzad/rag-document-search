@@ -137,6 +137,33 @@ async def ask_question(req: AskRequest):
     response = format_response(answer, chunks, rerank_scores)
 
     return response
+@router.get("/debug-session/{session_id}")
+async def debug_session(session_id: str):
+    """Temporary debug endpoint - remove after fixing"""
+    from app.services.vector_store import index, DIMENSION
+    
+    # Check what vectors exist for this session
+    results = index.query(
+        vector=[0.0] * DIMENSION,
+        top_k=5,
+        include_metadata=True,
+        filter={"session_id": {"$eq": session_id}}
+    )
+    
+    # Also check WITHOUT filter to see if ANY vectors exist at all
+    results_no_filter = index.query(
+        vector=[0.0] * DIMENSION,
+        top_k=5,
+        include_metadata=True
+    )
+    
+    return {
+        "session_id": session_id,
+        "vectors_with_filter": len(results.get("matches", [])),
+        "sample_filtered": [m["metadata"] for m in results.get("matches", [])[:2]],
+        "total_vectors_no_filter": len(results_no_filter.get("matches", [])),
+        "sample_any": [m["metadata"] for m in results_no_filter.get("matches", [])[:2]],
+    }
 
 @router.delete("/delete/{document_name}")
 async def delete_document(document_name: str):
