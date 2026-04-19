@@ -1,8 +1,11 @@
+import logging
+import sys
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 from pathlib import Path
 import shutil
 import uuid
+import traceback
 
 from app.models.schemas import AskRequest
 from app.rag.pipeline import retrieve_context
@@ -14,129 +17,213 @@ from app.services.vector_store import similarity_search, delete_document_embeddi
 from app.services.re_ranker import get_reranker
 from app.services.ingestion_pipeline import data_ingestion
 
+# Setup logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 UPLOAD_DIR = Path("data/documents")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+logger.info(f"Upload directory: {UPLOAD_DIR}")
+
 
 @router.get("/health")
 async def health_check():
+    """Health check endpoint that verifies all dependencies"""
+    logger.info("Health check requested")
     status = {}
 
     try:
         model = get_embedding_model()
         test_vector = model.embed_query("health check")
         status["embedding_model"] = "ok" if len(test_vector) == 384 else "wrong dimension"
+        logger.info(f"Embedding model: {status['embedding_model']}")
     except Exception as e:
-        status["embedding_model"] = f"failed — {str(e)}"
+        error_msg = f"failed - {str(e)}"
+        status["embedding_model"] = error_msg
+        logger.error(f"Embedding model check failed: {error_msg}\n{traceback.format_exc()}")
 
     try:
         dummy_vector = [0.0] * 384
         result = similarity_search(dummy_vector, top_k=1)
         status["pinecone"] = "ok"
+        logger.info("Pinecone vector store: ok")
     except Exception as e:
-        status["pinecone"] = f"failed — {str(e)}"
+        error_msg = f"failed - {str(e)}"
+        status["pinecone"] = error_msg
+        logger.error(f"Pinecone check failed: {error_msg}\n{traceback.format_exc()}")
 
     try:
         reranker = get_reranker()
         test_score = reranker.predict([("test query", "test chunk")])
         status["reranker"] = "ok"
+        logger.info("Reranker: ok")
     except Exception as e:
-        status["reranker"] = f"failed — {str(e)}"
+        error_msg = f"failed - {str(e)}"
+        status["reranker"] = error_msg
+        logger.error(f"Reranker check failed: {error_msg}\n{traceback.format_exc()}")
 
     all_ok = all(v == "ok" for v in status.values())
     status["overall"] = "healthy" if all_ok else "degraded"
-
-    return status
+    
+    http_status = 200 if all_ok else 503
+    logger.info(f"Health check result: {status['overall']} (HTTP {http_status})")
+    
+    return JSONResponse(status_code=http_status, content=status)
 
 
 @router.post("/upload")
 async def upload_pdf(file: UploadFile = File(...), session_id: str = Form(None)):
-
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF allowed")
+    """
+    Upload a PDF document for processing.
+    Returns session_id and number of chunks processed.
+    """
+    logger.info(f"Upload request: filename={file.filename}, session_id={session_id}")
     
-    # Auto-generate session_id if not provided
-    if not session_id or not isinstance(session_id, str) or len(session_id.strip()) == 0:
-        session_id = str(uuid.uuid4())
-
-    delete_session_embeddings(session_id)
-    storage_path = UPLOAD_DIR / file.filename
-
     try:
-        with storage_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # Validate file type
+        if not file.filename.lower().endswith(".pdf"):
+            logger.warning(f"Invalid file type: {file.filename}")
+            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+        
+        # Auto-generate session_id if not provided
+        if not session_id or not isinstance(session_id, str) or len(session_id.strip()) == 0:
+            session_id = str(uuid.uuid4())
+            logger.info(f"Generated new session_id: {session_id}")
+        
+        # Clean up previous embeddings for this session
+        try:
+            delete_session_embeddings(session_id)
+            logger.info(f"Cleaned up previous embeddings for session: {session_id}")
+        except Exception as e:
+            logger.warning(f"Could not clean previous embeddings: {str(e)}")
 
-        chunks, embeddings = data_ingestion(str(storage_path), session_id)
+        # Save file to disk
+        storage_path = UPLOAD_DIR / file.filename
+        logger.info(f"Saving file to: {storage_path}")
+        
+        try:
+            with storage_path.open("wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            logger.info(f"File saved successfully: {storage_path}")
+        except Exception as e:
+            logger.error(f"Failed to save file: {str(e)}\n{traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "filename": file.filename,
-                "chunks_processed": len(chunks),
-                "session_id": session_id
-            }
-        )
-    except ValueError as e:
-        if storage_path.exists(): storage_path.unlink()
-        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
-    except RuntimeError as e:
-        if storage_path.exists(): storage_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+        # Process document through ingestion pipeline
+        logger.info(f"Starting data ingestion for: {file.filename}")
+        try:
+            chunks, embeddings = data_ingestion(str(storage_path), session_id)
+            logger.info(f"Data ingestion completed: {len(chunks)} chunks, {len(embeddings)} embeddings")
+        except ValueError as e:
+            logger.error(f"Validation error during ingestion: {str(e)}\n{traceback.format_exc()}")
+            if storage_path.exists():
+                storage_path.unlink()
+            raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+        except RuntimeError as e:
+            logger.error(f"Runtime error during ingestion: {str(e)}\n{traceback.format_exc()}")
+            if storage_path.exists():
+                storage_path.unlink()
+            raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during ingestion: {str(e)}\n{traceback.format_exc()}")
+            if storage_path.exists():
+                storage_path.unlink()
+            raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+        response_data = {
+            "success": True,
+            "filename": file.filename,
+            "chunks_processed": len(chunks),
+            "session_id": session_id
+        }
+        logger.info(f"Upload successful: {response_data}")
+        
+        return JSONResponse(status_code=200, content=response_data)
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        if storage_path.exists(): storage_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+        logger.error(f"Unexpected error in upload endpoint: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @router.post("/cleanup")
 async def cleanup_session(session_id: str = Form(...)):
     """Delete all embeddings for a session when user leaves/refreshes"""
+    logger.info(f"Cleanup requested for session: {session_id}")
+    
     if not session_id or not isinstance(session_id, str) or len(session_id.strip()) == 0:
+        logger.warning("Cleanup request with invalid session_id")
         raise HTTPException(status_code=400, detail="Valid session_id is required")
     
     try:
         result = delete_session_embeddings(session_id)
         if result["success"]:
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "success": True,
-                    "message": f"Session {session_id} cleaned up",
-                    "deleted_count": result["deleted_count"]
-                }
-            )
+            response_data = {
+                "success": True,
+                "message": f"Session {session_id} cleaned up",
+                "deleted_count": result.get("deleted_count", 0)
+            }
+            logger.info(f"Cleanup successful: {response_data}")
+            return JSONResponse(status_code=200, content=response_data)
         else:
-            raise HTTPException(status_code=400, detail=result.get("error", "Cleanup failed"))
+            error_msg = result.get("error", "Cleanup failed")
+            logger.error(f"Cleanup failed: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Cleanup error: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Cleanup error: {str(e)}")
 
 @router.post("/ask")
 async def ask_question(req: AskRequest):
-    query = req.question.strip()
-
-    if not query:
-        raise HTTPException(status_code=400, detail="Question cannot be empty")
-
-    if not req.session_id:
-        raise HTTPException(status_code=400, detail="session_id is required")
+    """Process user question and return answer with sources"""
+    logger.info(f"Question received from session {req.session_id}: {req.question[:100]}...")
     
-    chunks = retrieve_context(query, session_id=req.session_id)  # ← fixed
+    try:
+        query = req.question.strip()
 
-    if not chunks:
-        return {
-            "answer": "No relevant information found",
-            "sources": [],
-            "confidence": 0.0
-        }
+        if not query:
+            logger.warning("Empty question received")
+            raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-    prompt = build_prompt(chunks, query)
-    answer = generate_answer(prompt)
-    
-    rerank_scores = [c.get("rerank_score", 0.0) for c in chunks]
-    response = format_response(answer, chunks, rerank_scores)
+        if not req.session_id:
+            logger.warning("Question without session_id")
+            raise HTTPException(status_code=400, detail="session_id is required")
+        
+        # Retrieve context
+        logger.info(f"Retrieving context for query: {query[:50]}...")
+        chunks = retrieve_context(query, session_id=req.session_id)
+        logger.info(f"Retrieved {len(chunks) if chunks else 0} chunks")
 
-    return response
+        if not chunks:
+            logger.info("No relevant chunks found, returning empty response")
+            return {
+                "answer": "No relevant information found in the uploaded documents.",
+                "sources": [],
+                "confidence": 0.0
+            }
+
+        # Generate answer
+        logger.info("Building prompt and generating answer...")
+        prompt = build_prompt(chunks, query)
+        answer = generate_answer(prompt)
+        logger.info(f"Answer generated: {answer[:100]}...")
+        
+        # Format response with rerank scores
+        rerank_scores = [c.get("rerank_score", 0.0) for c in chunks]
+        response = format_response(answer, chunks, rerank_scores)
+        
+        logger.info(f"Response formatted with {len(chunks)} sources")
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in ask endpoint: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error processing question: {str(e)}")
 @router.get("/debug-session/{session_id}")
 async def debug_session(session_id: str):
     """Temporary debug endpoint - remove after fixing"""

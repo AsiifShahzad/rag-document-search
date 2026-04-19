@@ -1,10 +1,20 @@
 import os
 import requests
+import logging
 from dotenv import load_dotenv
+
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Validate API key at module load time
+if not GROQ_API_KEY:
+    logger.error("GROQ_API_KEY environment variable is not set!")
+else:
+    logger.info(f"GROQ_API_KEY loaded (length: {len(GROQ_API_KEY)} chars)")
 
 # Fallback order: best to worst
 GROQ_MODELS = [
@@ -16,6 +26,9 @@ GROQ_MODELS = [
 def generate_answer(prompt: str) -> str:
     if not prompt or not prompt.strip():
         raise ValueError("Prompt is empty — cannot send to Groq")
+    
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is not set. Please check your environment variables.")
 
     if len(prompt) > 15000:
         prompt = prompt[:15000]

@@ -1,0 +1,52 @@
+# render.yaml - Render Deployment Configuration
+
+# This file configures automatic deployment on Render
+# Place it in your repository root
+
+services:
+  - type: web
+    name: DocumentChat Backend
+    runtime: python
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    
+    # Build configuration
+    buildCommand: pip install -r requirements.txt
+    
+    # Environment variables (or set in Render dashboard)
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: PORT
+        value: "7860"
+      - key: DEBUG
+        value: "False"
+      # Add these in Render dashboard (not in git):
+      # GROQ_API_KEY
+      # PINECONE_API_KEY
+      # PINECONE_INDEX
+    
+    # Instance configuration
+    plan: standard  # standard, pro, pro_plus
+    region: oregon  # Change as needed
+    
+    # Health check
+    healthCheckPath: /health
+    healthCheckInterval: 30  # Check every 30 seconds
+    healthCheckTimeout: 5    # Wait 5 seconds for response
+    
+    # Auto-restart on crash
+    maxShutdownDelay: 30
+    
+    # Logging
+    autoDeploy: true  # Auto-deploy on git push
+    
+    # Scaling (optional)
+    # previewPlans: enabled
+    
+    # Timeout settings
+    envVarsFile: .env  # Optional local env vars (not committed)
+
+# Database configuration (if needed)
+# databases:
+#   - name: documentchat_db
+#     plan: starter
